@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+    tags:
+      - "v*"
+  pull_request:
+  # Allow manual runs from the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Migrations match models
+        run: uv run alembic -x db_url=sqlite:///$RUNNER_TEMP/check.db upgrade head && uv run alembic -x db_url=sqlite:///$RUNNER_TEMP/check.db check
+
+      - name: Tests
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build
+
+  docker:
+    name: Build and push Docker image
+    needs: [backend, frontend]
+    # Pull requests only run the tests.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the commit count used as the patch number is correct.
+          fetch-depth: 0
+
+      # release/X.Y.Z -> X.Y.Z+<commit count> (release/X.Y counts as X.Y.0);
+      # tag vX.Y.Z -> X.Y.Z; any other branch -> 0.0.0-<branch>+<commit count>.
+      - name: Compute version
+        id: version
+        run: |
+          count=$(git rev-list --count HEAD)
+          ref="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${ref#v}"
+          elif [[ "$ref" =~ ^release/([0-9]+)\.([0-9]+)(\.([0-9]+))? ]]; then
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[4]:-0}+${count}"
+          else
+            # Semver pre-release identifiers only allow [0-9A-Za-z-].
+            version="0.0.0-$(printf '%s' "$ref" | tr -c '0-9A-Za-z-' '-')+${count}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Docker tags do not allow "+".
+          echo "tag=${version//+/-}" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Tag "latest" only for the default branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Branch name for pushes to a branch (e.g. main)
+            type=ref,event=branch
+            # Full semver for version tags (v1.2.3 -> 1.2.3)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # Computed version for release branches (release/1.2.3 -> 1.2.3-<count>)
+            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ startsWith(github.ref, 'refs/heads/release/') }}
+            # Short commit SHA for traceability
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # amd64 for a PC, arm64 for the Raspberry Pi 5 (64-bit Raspberry Pi OS).
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

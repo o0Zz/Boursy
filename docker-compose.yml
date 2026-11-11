@@ -1,0 +1,15 @@
+services:
+  boursy:
+    # Published by CI (.github/workflows/ci.yml). `docker compose up -d --build` builds it locally instead.
+    image: ghcr.io/o0zz/boursy:latest
+    build: .
+    container_name: boursy
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${BOURSY_PORT:-8090}:8000"
+    volumes:
+      - boursy-data:/data
+
+volumes:
+  boursy-data:

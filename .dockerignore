@@ -1,0 +1,15 @@
+# The root .git is read by the Dockerfile's version stage (commit count). The index changes on
+# every `git add` and is not needed to count commits.
+.git/index
+**/.gitignore
+.github
+.env
+**/node_modules
+**/__pycache__
+frontend/dist
+backend/.venv
+backend/data
+backend/VERSION
+backend/.pytest_cache
+backend/.ruff_cache
+data

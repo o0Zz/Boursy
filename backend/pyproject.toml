@@ -1,0 +1,42 @@
+[project]
+name = "boursy"
+version = "0.1.0"
+description = "AI-assisted medium-term trading assistant for European healthcare stocks (PEA)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0.36",
+    "pydantic-settings>=2.6",
+    "apscheduler>=3.10,<4",
+    "pandas>=2.2",
+    "numpy>=2.0",
+    "yfinance>=0.2.54",
+    "exchange-calendars>=4.6",
+    "itsdangerous>=2.2",
+    "httpx>=0.28",
+    "alembic>=1.14",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["boursy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
