@@ -8,3 +8,4 @@ backend/.ruff_cache/
 frontend/node_modules/
 frontend/dist/
 backend/VERSION
+frontend/*.tsbuildinfo
