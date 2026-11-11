@@ -20,6 +20,7 @@ function gitVersion(): string | null {
 }
 
 export default defineConfig({
+  build: { chunkSizeWarningLimit: 900 },
   plugins: [react(), tailwindcss()],
   define: {
     // APP_VERSION is passed in by the Docker build, where there is no git binary.

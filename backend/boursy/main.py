@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from boursy import __version__
-from boursy.api import auth, stocks, system
+from boursy.api import analysis, auth, portfolio, proposals, stocks, system
 from boursy.config import Settings, get_settings
 from boursy.data.provider import MarketDataProvider
 from boursy.data.yahoo import YahooProvider
@@ -81,6 +81,9 @@ def create_app(settings: Settings | None = None, provider: MarketDataProvider | 
     app.include_router(auth.router)
     app.include_router(stocks.router)
     app.include_router(system.router)
+    app.include_router(portfolio.router)
+    app.include_router(proposals.router)
+    app.include_router(analysis.router)
     mount_frontend(app, settings)
     return app
 

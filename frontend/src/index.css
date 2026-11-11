@@ -6,9 +6,44 @@
 
 body {
   @apply bg-slate-950 text-slate-200 antialiased;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background-image:
+    radial-gradient(60rem 30rem at 0% -10%, rgb(16 185 129 / 0.07), transparent 60%),
+    radial-gradient(50rem 30rem at 110% 0%, rgb(56 189 248 / 0.05), transparent 60%);
+  background-attachment: fixed;
 }
 
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-slate-800/80 bg-slate-900/70 shadow-[0_1px_0_0_rgb(255_255_255/0.03)_inset] backdrop-blur;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-700/80 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-emerald-500/70 focus:ring-2 focus:ring-emerald-500/20;
+  }
+  .table-base {
+    @apply w-full text-sm;
+  }
+  .table-base thead th {
+    @apply whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+  }
+  .table-base tbody td {
+    @apply px-3 py-2.5 align-middle;
+  }
+  .table-base tbody tr {
+    @apply border-t border-slate-800/70;
+  }
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
 }

@@ -9,8 +9,18 @@ from boursy import __version__
 from boursy.api.auth import require_user
 from boursy.db.models import DailyBar, JobRun, Stock
 from boursy.db.session import get_db
-from boursy.scheduler.jobs import refresh_data, refresh_lock, run_job
-from boursy.timeutil import to_iso_utc, utcnow
+from boursy.scheduler.jobs import (
+    midday,
+    post_close,
+    pre_open,
+    refresh_data,
+    refresh_lock,
+    run_job,
+    run_trading,
+    trading_lock,
+    weekly,
+)
+from boursy.timeutil import market_today, to_iso_utc, utcnow
 
 public = APIRouter(prefix="/api", tags=["system"])
 router = APIRouter(prefix="/api/system", tags=["system"], dependencies=[Depends(require_user)])
@@ -38,6 +48,7 @@ def status(request: Request, db: Session = Depends(get_db)) -> dict:
         "last_bar_date": (d.isoformat() if (d := db.scalar(select(func.max(DailyBar.date)))) else None),
         "stocks_with_errors": db.scalar(select(func.count(Stock.id)).where(Stock.last_error.is_not(None))),
         "refresh_running": refresh_lock.locked(),
+        "trading_running": trading_lock.locked(),
         "scheduler_running": bool(sched and sched.running),
         "scheduled_jobs": jobs,
         "data_provider": request.app.state.provider.name,
@@ -72,3 +83,31 @@ def refresh(body: RefreshIn, request: Request, background: BackgroundTasks) -> d
     symbols = [s.upper() for s in body.symbols] if body.symbols else None
     background.add_task(run_job, "manual_refresh", lambda: refresh_data(settings, provider, symbols))
     return {"started": True}
+
+
+JOBS = {
+    "post_close": "Post-close: data, signals, proposals",
+    "trading": "Signals and proposals only (no download)",
+    "midday": "Midday monitor",
+    "pre_open": "Pre-open news check (AI)",
+    "weekly": "Weekly screening and summary",
+}
+
+
+@router.post("/run/{job}", status_code=202)
+def run_now(job: str, request: Request, background: BackgroundTasks) -> dict:
+    """Run a scheduled job now, in the background. Trading days are not checked for `trading`."""
+    settings, provider = request.app.state.settings, request.app.state.provider
+    fns = {
+        "post_close": lambda: post_close(settings, provider),
+        "trading": lambda: run_trading(settings, market_today(settings.timezone)),
+        "midday": lambda: midday(settings, provider),
+        "pre_open": lambda: pre_open(settings),
+        "weekly": lambda: weekly(settings),
+    }
+    if job not in fns:
+        raise HTTPException(status_code=404, detail=f"Unknown job {job}")
+    if job in ("post_close", "trading") and (trading_lock.locked() or refresh_lock.locked()):
+        raise HTTPException(status_code=409, detail="A data refresh or trading run is already running")
+    background.add_task(run_job, f"manual_{job}", fns[job])
+    return {"started": True, "job": job}

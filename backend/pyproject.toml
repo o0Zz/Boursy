@@ -16,6 +16,7 @@ dependencies = [
     "itsdangerous>=2.2",
     "httpx>=0.28",
     "alembic>=1.14",
+    "anthropic>=0.80",
 ]
 
 [dependency-groups]
@@ -37,6 +38,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+# Long strings (messages, prompts) are fine; the formatter wraps code.
+ignore = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]

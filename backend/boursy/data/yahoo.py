@@ -49,3 +49,21 @@ class YahooProvider:
         df["adj_close"] = df["adj_close"].fillna(df["close"])
         df["volume"] = df["volume"].fillna(0).astype("int64")
         return df
+
+    def fx_rate(self, currency: str) -> float:
+        """EUR per unit of `currency` (Yahoo quotes EURDKK=X as DKK per EUR)."""
+        try:
+            hist = yf.Ticker(f"EUR{currency}=X").history(period="5d", interval="1d", raise_errors=True)
+        except Exception as exc:
+            raise DataError(f"EUR{currency}: {exc}") from exc
+        if hist is None or hist.empty:
+            raise DataError(f"EUR{currency}: no data")
+        return 1.0 / float(hist["Close"].dropna().iloc[-1])
+
+    def quote(self, symbol: str) -> dict:
+        """Latest price (delayed ~15 min) and previous close."""
+        try:
+            info = yf.Ticker(symbol).fast_info
+            return {"last": float(info["last_price"]), "previous_close": float(info["previous_close"])}
+        except Exception as exc:
+            raise DataError(f"{symbol}: {exc}") from exc

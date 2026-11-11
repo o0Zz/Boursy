@@ -4,7 +4,7 @@ AI-assisted, medium-term stock trading bot for European healthcare stocks, held 
 Version 1 is **semi-automatic**: the bot finds, tracks and proposes trades; the user places the orders
 in their PEA broker app and confirms them in the dashboard.
 
-Status: draft v0.1 (2026-11-11) - M1 and M2 implemented.
+Status: v0.2 (2026-11-11) - M1 to M6 implemented; M6 live trading starts once paper mode has run for a few days.
 
 ---
 
@@ -154,13 +154,31 @@ The values below are starting defaults, not proven values.
 
 ### Sell signal (any one is enough)
 
-1. **Stop-loss hit:** close below the stop price. Initial stop = entry - 2 x ATR(14), capped at -10 % (`core`) / -15 % (`growth`).
-2. **Trailing stop:** once the gain is > 1.5 x initial risk, the stop rises to the highest close - 2.5 x ATR(14).
-3. **Trend break:** close below SMA50 for 2 consecutive sessions.
+1. **Stop-loss hit:** close below the stop price. Initial stop = entry - 3 x ATR(14), capped at -10 % (`core`) / -15 % (`growth`).
+2. **Trailing stop:** once the gain is > 1.5 x initial risk, the stop rises to the highest close - 3.5 x ATR(14).
+3. **Trend break:** close below SMA50 for 10 consecutive sessions.
 4. **Exhaustion:** RSI(14) > 75 and MACD crosses below its signal line - propose selling half.
 5. **Thesis break:** the AI flags a negative event (failed trial, regulator rejection, guidance cut, fraud, dilution).
 6. **Event protection:** a binary event is in the next 2 trading days and the position is in `growth` - propose to sell or reduce to half.
-7. **Time stop:** no progress (gain < +3 %) after 60 trading days.
+7. **Time stop:** no progress (gain < +3 %) after 120 trading days.
+
+### Backtest result and defaults (2026-11-11)
+
+First backtest over Aug 2022 - Nov 2026 (4.2 years after the SMA 200 warm-up, 26 stocks, 10 000 EUR,
+BoursoBank fees):
+
+| Variant | Return | Max drawdown | Trades | Fees |
+|---|---|---|---|---|
+| Draft exits (2 ATR stop, 2.5 ATR trailing, 2-session trend break, 60-session time stop), no kill switch | -42 % | -47 % | 272 | 3 268 EUR |
+| Current defaults (3 ATR stop, 3.5 ATR trailing, 10-session trend break, 120-session time stop), no kill switch | +19 % | -23 % | 168 | 2 420 EUR |
+| Same, Trade Republic fees | +41 % | -14 % | 169 | 317 EUR |
+| Current defaults with the -20 % kill switch | -19 % | -21 % | 54 | 827 EUR |
+| Equal-weight buy-and-hold of the same stocks | +99 % | -25 % | - | - |
+
+The draft exits were stopped out by normal noise, so the defaults were widened. Even so the strategy
+trails buy-and-hold over this period, the kill switch triggers in late 2023, and fees at BoursoBank
+take a large part of the gains. No AI filter and no event calendar exist in the backtest. Treat paper
+mode as the real test before any live money.
 
 ### Proposal content
 
@@ -430,6 +448,16 @@ Boursy/
 M4 can run before M5 (paper mode without AI filter) to start collecting results earlier.
 
 ---
+
+## 16b. Implementation notes (differences from the draft)
+
+- Paper fills run inside the 17:45 post-close job (before new signals), not in a separate 18:00 job:
+  proposals from the previous session fill against today's bar, then today's signals are computed.
+- Paper and backtest simulate the resting stop order at the broker (a gap below the stop fills at the
+  open). Live positions are checked against the stop at 12:30 and on the close.
+- Weekly screening runs as sequential calls on both backends; the Message Batches API and the
+  server-side refusal fallback are not used yet. A refusal is logged and the stock is skipped.
+- The Docker runtime is Alpine; Claude Code is installed with the native installer (musl build).
 
 ## 17. Open points
 

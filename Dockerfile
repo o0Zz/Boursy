@@ -39,12 +39,27 @@ COPY --from=version /version /version
 RUN APP_VERSION="$(cat /version)" npm run build
 
 # ---- Stage 2: Python runtime (API + scheduler + static files) ----
-FROM python:3.12-slim-bookworm AS runtime
+# Alpine instead of Debian slim: Debian bookworm carried ~98 HIGH/CRITICAL CVEs with no fix
+# available (krb5, util-linux, sqlite). `apk upgrade` pulls fixes published after the base tag.
+FROM python:3.12-alpine AS runtime
 COPY --from=ghcr.io/astral-sh/uv:0.9.21 /uv /usr/local/bin/uv
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# pip ships with the base image but is unused (uv installs the deps) and carries its own CVEs.
+RUN apk upgrade --no-cache && apk add --no-cache tzdata ca-certificates \
+    && python -m pip uninstall -y pip
+
+# Claude Code CLI for the `subscription` AI backend (headless `claude -p`). Native installer,
+# pinned version, no auto-update. On Alpine it needs libgcc, libstdc++ and the system ripgrep.
+ARG CLAUDE_CODE_VERSION=2.1.322
+RUN apk add --no-cache libgcc libstdc++ ripgrep \
+    && apk add --no-cache --virtual .claude-install bash curl \
+    && HOME=/opt/claude-code bash -c "curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}" \
+    && ln -s "$(readlink -f /opt/claude-code/.local/bin/claude)" /usr/local/bin/claude \
+    && chmod -R a+rX /opt/claude-code \
+    && apk del .claude-install \
+    && HOME=/tmp claude --version && rm -rf /tmp/.claude*
+ENV USE_BUILTIN_RIPGREP=0 \
+    DISABLE_AUTOUPDATER=1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -66,7 +81,7 @@ RUN uv sync --frozen --no-dev
 COPY --from=web /web/dist ./static
 COPY --from=version /version ./VERSION
 
-RUN useradd --system --uid 1000 --home-dir /app boursy \
+RUN addgroup -S -g 1000 boursy && adduser -S -D -u 1000 -h /app -G boursy boursy \
     && mkdir -p /data && chown boursy:boursy /data
 USER boursy
 # Runtime caches (yfinance cookies and timezones) go to the writable volume.

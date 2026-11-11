@@ -58,7 +58,9 @@ def test_downgrade_to_base_and_back(tmp_path: Path):
 def test_database_without_history_is_stamped_and_keeps_data(tmp_path: Path):
     db = tmp_path / "t.db"
     legacy = create_engine(_url(db))
-    Base.metadata.create_all(legacy)  # how M1 created tables before migrations existed
+    # How M1 created its three tables before migrations existed.
+    baseline = [Base.metadata.tables[t] for t in ("stocks", "daily_bars", "job_runs")]
+    Base.metadata.create_all(legacy, tables=baseline)
     with legacy.begin() as conn:
         conn.execute(
             text(

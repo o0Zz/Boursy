@@ -3,13 +3,14 @@ import {
   CandlestickSeries,
   ColorType,
   createChart,
+  createSeriesMarkers,
   HistogramSeries,
   LineSeries,
   LineStyle,
   type LineData,
   type Time,
 } from "lightweight-charts";
-import type { Bar } from "../api/types";
+import type { Bar, StockTrade } from "../api/types";
 
 const COLORS = {
   text: "#94a3b8",
@@ -30,7 +31,13 @@ function line(bars: Bar[], key: NumKey): LineData<Time>[] {
   return bars.filter((b) => b[key] != null).map((b) => ({ time: b.time as Time, value: b[key] as number }));
 }
 
-export default function PriceChart({ bars }: { bars: Bar[] }) {
+export interface PriceLine {
+  price: number;
+  label: string;
+  color: string;
+}
+
+export default function PriceChart({ bars, trades = [], lines = [] }: { bars: Bar[]; trades?: StockTrade[]; lines?: PriceLine[] }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,6 +47,7 @@ export default function PriceChart({ bars }: { bars: Bar[] }) {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: COLORS.text,
+        attributionLogo: false,
         panes: { separatorColor: COLORS.grid },
       },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
@@ -57,6 +65,22 @@ export default function PriceChart({ bars }: { bars: Bar[] }) {
       borderVisible: false,
     });
     candles.setData(bars.map((b) => ({ time: b.time as Time, open: b.open, high: b.high, low: b.low, close: b.close })));
+
+    // Fills (adjusted prices on the chart are close to the raw fill prices for recent trades).
+    const first = bars[0].time;
+    const markers = trades
+      .filter((t) => t.date >= first)
+      .map((t) => ({
+        time: t.date as Time,
+        position: t.side === "buy" ? ("belowBar" as const) : ("aboveBar" as const),
+        color: t.side === "buy" ? COLORS.up : COLORS.down,
+        shape: t.side === "buy" ? ("arrowUp" as const) : ("arrowDown" as const),
+        text: `${t.side === "buy" ? "B" : "S"} ${t.qty}${t.mode === "paper" ? " (paper)" : ""}`,
+      }));
+    if (markers.length) createSeriesMarkers(candles, markers);
+    for (const l of lines) {
+      candles.createPriceLine({ price: l.price, color: l.color, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: true, title: l.label });
+    }
 
     const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false });
     volume.setData(
@@ -108,7 +132,7 @@ export default function PriceChart({ bars }: { bars: Bar[] }) {
     chart.timeScale().fitContent();
 
     return () => chart.remove();
-  }, [bars]);
+  }, [bars, trades, lines]);
 
   return (
     <div>

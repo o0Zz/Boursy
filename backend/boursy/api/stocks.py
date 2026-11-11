@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 
 from boursy.api.auth import require_user
 from boursy.data.service import load_bars
-from boursy.db.models import Stock
+from boursy.db.models import AIReview, Portfolio, Position, Proposal, Stock, StockEvent, Trade
 from boursy.db.session import get_db
 from boursy.indicators.core import INDICATOR_COLUMNS, compute_all, snapshot, trend_label
-from boursy.timeutil import to_iso_utc
+from boursy.timeutil import to_iso_utc, utcnow
 from boursy.universe.seed import make_stock
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"], dependencies=[Depends(require_user)])
@@ -40,12 +40,60 @@ def stock_out(stock: Stock) -> dict:
     }
 
 
+def research(session: Session, stock: Stock) -> dict:
+    """Latest AI score, last signal, next event and holdings, for the watchlist."""
+    review = session.scalar(
+        select(AIReview)
+        .where(AIReview.stock_id == stock.id, AIReview.ok.is_(True), AIReview.score.is_not(None))
+        .order_by(AIReview.id.desc())
+        .limit(1)
+    )
+    prop = session.scalar(
+        select(Proposal).where(Proposal.stock_id == stock.id).order_by(Proposal.id.desc()).limit(1)
+    )
+    event = session.scalar(
+        select(StockEvent)
+        .where(StockEvent.stock_id == stock.id, StockEvent.date >= utcnow().date())
+        .order_by(StockEvent.date)
+        .limit(1)
+    )
+    held = session.scalars(
+        select(Portfolio.mode)
+        .join(Position, Position.portfolio_id == Portfolio.id)
+        .where(Position.stock_id == stock.id, Position.status == "open")
+    ).all()
+    return {
+        "ai": (
+            {
+                "score": review.score,
+                "summary": review.summary,
+                "task": review.task,
+                "date": to_iso_utc(review.created_at),
+            }
+            if review
+            else None
+        ),
+        "last_signal": (
+            {"side": prop.side, "rule": prop.rule, "date": prop.created_on.isoformat(), "status": prop.status}
+            if prop
+            else None
+        ),
+        "next_event": (
+            {"date": event.date.isoformat(), "kind": event.kind, "title": event.title, "binary": event.binary}
+            if event
+            else None
+        ),
+        "held_in": sorted(set(held)),
+    }
+
+
 def summarize(session: Session, stock: Stock) -> dict:
     raw = load_bars(session, stock.id, limit=SUMMARY_BARS)
+    extra = research(session, stock)
     if raw.empty:
-        return {**stock_out(stock), "snapshot": None, "trend": "n/a"}
+        return {**stock_out(stock), **extra, "snapshot": None, "trend": "n/a"}
     snap = snapshot(compute_all(raw), raw)
-    return {**stock_out(stock), "snapshot": snap, "trend": trend_label(snap)}
+    return {**stock_out(stock), **extra, "snapshot": snap, "trend": trend_label(snap)}
 
 
 def get_stock_or_404(session: Session, symbol: str) -> Stock:
@@ -119,3 +167,26 @@ def get_bars(symbol: str, days: int = Query(365, ge=20, le=3000), db: Session = 
         for d, row in ind.iterrows()
     ]
     return {"symbol": stock.symbol, "currency": stock.currency, "bars": bars}
+
+
+@router.get("/{symbol}/trades")
+def stock_trades(symbol: str, db: Session = Depends(get_db)) -> list[dict]:
+    """Fills on this stock in every portfolio, for the chart markers."""
+    stock = get_stock_or_404(db, symbol)
+    rows = db.execute(
+        select(Trade, Portfolio.mode)
+        .join(Portfolio, Portfolio.id == Trade.portfolio_id)
+        .where(Trade.stock_id == stock.id)
+        .order_by(Trade.executed_on)
+    ).all()
+    return [
+        {
+            "date": t.executed_on.isoformat(),
+            "side": t.side,
+            "qty": t.qty,
+            "price": t.price,
+            "mode": mode,
+            "realized_pnl_eur": t.realized_pnl_eur,
+        }
+        for t, mode in rows
+    ]

@@ -3,9 +3,21 @@
 AI-assisted, medium-term trading assistant for European healthcare stocks held in a French PEA.
 See [SPEC.md](SPEC.md) for the full specification and milestones.
 
-Current state: **M1 + M2** - app skeleton, login, healthcare universe (26 stocks), daily market data
-from Yahoo Finance, indicators (EMA 20, SMA 50/200, RSI 14, MACD, ATR 14, Bollinger), dashboard with
-watchlist and charts, scheduler (post-close refresh, nightly backup).
+Current state: **M1 to M6** implemented.
+
+- **Data and indicators:** 26 PEA-eligible healthcare stocks, daily bars from Yahoo Finance, EMA 20,
+  SMA 50/200, RSI 14, MACD, ATR 14, Bollinger.
+- **Strategy v1 and risk rules:** trend-following swing entries (pullback or MACD momentum in an
+  uptrend), ATR stops with trailing, trend break, exhaustion, event protection, time stop; position
+  sizing by weight and risk per trade, cash buffer, fee check, kill switch, re-entry cooldown.
+- **Backtest:** day-by-day replay with the live fill, fee and risk rules; equity curve against an
+  equal-weight buy-and-hold benchmark.
+- **Paper portfolio:** proposals fill automatically at the next session; resting stop orders.
+- **Live PEA portfolio (semi-automatic):** proposals, push and email, fill confirmation (partial
+  fills), rejection, manual trades, cash movements, stop edits, journal with CSV export.
+- **AI analyst (Claude):** weekly screening, signal review before each buy, pre-open news check on
+  open positions, event extraction. Backends: Anthropic API (monthly USD budget) or the user's own
+  Claude subscription through Claude Code (daily call cap).
 
 ## Run on the Raspberry Pi (Docker)
 
@@ -107,11 +119,31 @@ npm run dev
 
 | When | Job |
 |---|---|
-| Mon-Fri 17:45, Euronext trading days | Download new daily bars |
+| 08:30 trading days | AI news check on open positions (when AI is on) |
+| 12:30 trading days | Open positions vs stops, large moves, proposals expiring today |
+| 17:45 trading days | Download bars and FX, paper fills, sell and buy proposals, equity snapshot, notifications |
+| Saturday 09:00 | AI screening of the watchlist, reconciliation reminder (live), weekly summary email |
 | Every day 03:00 | SQLite backup to `/data/backups` (14 kept) |
-| On startup, if a stock has no data | Initial 5-year history download |
+| On startup, if a stock has no data | Initial history download (6 years) |
 
-A manual refresh is available on the System page.
+Every job can also be run from the System page.
+
+## AI analyst setup
+
+Pick the backend in Settings > AI analyst, then set the matching secret in `.env` and restart:
+
+- **API:** `ANTHROPIC_API_KEY`. Cost is computed from token usage; calls stop at the monthly budget.
+- **Subscription:** run `claude setup-token` on your PC and set `CLAUDE_CODE_OAUTH_TOKEN`. The image
+  ships the Claude Code CLI (pinned version, no auto-update). Personal use only: keep the dashboard
+  private. Calls stop at the daily cap.
+
+With AI off, the strategy runs on technical signals only and proposals say so.
+
+## Notifications
+
+Push through [ntfy](https://ntfy.sh): set `BOURSY_NTFY_TOPIC` to a long random name and subscribe to it
+in the ntfy app. Email through any SMTP server (`BOURSY_SMTP_*`, `BOURSY_MAIL_TO`). Use the test
+button in Settings.
 
 ## Disclaimer
 
